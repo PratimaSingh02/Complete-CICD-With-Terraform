@@ -221,7 +221,3 @@ vi myapp-service.yml
 
 ## Happy you got to this point. Hope it worked!
 
-# Congratulations!
-
-# Merciboi Systems Solutions
-# info@merciboi.com
