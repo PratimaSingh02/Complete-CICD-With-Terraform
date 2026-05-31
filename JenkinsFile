@@ -1,0 +1,99 @@
+pipeline {
+    agent any
+    
+    tools {
+        jdk 'jdk17'
+        maven 'maven3'
+    }
+
+    stages {
+        stage('Git Checkout') {
+            steps {
+               git branch: 'main', credentialsId: 'git-cred', url: 'https://github.com'
+            }
+        }
+        
+        stage('Build Artifact') {
+            steps {
+                sh "mvn clean package"
+            }
+        }
+        
+        stage('Build & Tag Docker Image') {
+            steps {
+               script {
+                   withDockerRegistry(credentialsId: 'docker-cred', toolName: 'docker') {
+                            sh "docker build -t dockpratima/boardshack:${BUILD_NUMBER} ."
+                    }
+               }
+            }
+        }
+        
+        stage('Push Docker Image') {
+            steps {
+               script {
+                   withDockerRegistry(credentialsId: 'docker-cred', toolName: 'docker') {
+                            sh "docker push dockpratima/boardshack:${BUILD_NUMBER}"
+                    }
+               }
+            }
+        }
+        
+        stage('Deploy To Kubernetes Cluster') {
+            steps {
+                // Hardcode your newly provisioned Master Private/Public IP below
+               withKubeConfig(caCertificate: '', clusterName: 'kubernetes', contextName: '', credentialsId: 'k8-cred', namespace: 'webapps', restrictKubeConfigAccess: false, serverUrl: 'https://172.31.8.146:6443') {
+                        
+                        // Dynamically update the manifest file image with the unique build number
+                        sh "sed -i 's|dockpratima/boardshack:latest|dockpratima/boardshack:${BUILD_NUMBER}|g' deployment-service.yaml"
+                        
+                        sh "kubectl apply -f deployment-service.yaml"
+                        sh "kubectl rollout status deployment/cicd-with-k8s -n webapps --timeout=120s"
+                }
+            }
+        }
+    }
+
+
+    post {
+        failure {
+                    withKubeConfig(caCertificate: '', clusterName: 'kubernetes', contextName: '', credentialsId: 'k8-cred', namespace: 'webapps', restrictKubeConfigAccess: false, serverUrl: 'https://172.31.8.146:6443') {
+                        echo "❌ Deployment failed! Triggering automatic rollback to previous version..."
+                        sh "kubectl rollout undo deployment/cicd-with-k8s -n webapps"
+                    }
+                }
+    always {
+        script {
+            def jobName = env.JOB_NAME
+            def buildNumber = env.BUILD_NUMBER
+            def pipelineStatus = currentBuild.result ?: 'UNKNOWN'
+            def bannerColor = pipelineStatus.toUpperCase() == 'SUCCESS' ? 'green' : 'red'
+
+            def body = """
+                <html>
+                <body>
+                <div style="border: 4px solid ${bannerColor}; padding: 10px;">
+                <h2>${jobName} - Build ${buildNumber}</h2>
+                <div style="background-color: ${bannerColor}; padding: 10px;">
+                <h3 style="color: white;">Pipeline Status: ${pipelineStatus.toUpperCase()}</h3>
+                </div>
+                <p>Check the <a href="${BUILD_URL}">console output</a>.</p>
+                </div>
+                </body>
+                </html>
+            """
+
+            emailext (
+                subject: "${jobName} - Build ${buildNumber} - ${pipelineStatus.toUpperCase()}",
+                body: body,
+                to: 'singhpratima21222@gmail.com',
+                from: 'jenkins@example.com',
+                replyTo: 'jenkins@example.com',
+                mimeType: 'text/html',
+                attachmentsPattern: 'trivy-image-report.html'
+            )
+        }
+    }
+}
+
+}

@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment # Kubernetes resource kind we are creating
+metadata:
+  name: cicd-with-k8s
+spec:
+  selector:
+    matchLabels:
+      app: cicd-with-k8s
+  replicas: 2 # Number of replicas that will be created for this deployment
+  progressDeadlineSeconds: 600 # 10 mins timeout before K8s marks deployment as failed
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: cicd-with-k8s
+    spec:
+      containers:
+        - name: boardgame
+          image: dockpratima/boardshack:latest # Image that will be used to containers in the cluster
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080 # The port that the container is running on in the cluster
+            # --- KUBERNETES USES THIS TO CHECK IF NEW POD IS HEALTHY ---
+          readinessProbe:
+            httpGet:
+              path: /actuator/health # Or your app's main homepage context path "/"
+              port: 8080
+            initialDelaySeconds: 15  # Wait 15 seconds for Java to start up before checking
+            periodSeconds: 10        # Check every 10 seconds
+
+
+---
+
+apiVersion: v1 # Kubernetes API version
+kind: Service # Kubernetes resource kind we are creating
+metadata: # Metadata of the resource kind we are creating
+  name: cicd-with-k8s-ssvc
+spec:
+  selector:
+    app: cicd-with-k8s
+  ports:
+    - protocol: "TCP"
+      port: 80
+      targetPort: 8080 
+  type: LoadBalancer # type of the service.

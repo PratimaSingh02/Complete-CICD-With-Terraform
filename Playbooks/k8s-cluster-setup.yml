@@ -1,0 +1,95 @@
+---
+- name: Install Prerequisites on All Amazon Linux 2 Nodes
+  hosts: all
+  become: true
+  tasks:
+    - name: Disable Swap (Required for K8s)
+      shell: |
+        swapoff -a
+        sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
+
+    # COMMAND 1: Exact Amazon Linux 2 native Docker installation
+    - name: Install Docker Engine
+      shell: sudo yum install docker -y
+
+    - name: Set secure permissions on Docker socket (Owner and Group only)
+      shell: sudo chmod 660 /var/run/docker.sock
+
+    - name: Add Jenkins and deployment users to the docker group
+      shell: |
+        sudo usermod -aG docker ec2-user
+
+
+    - name: Ensure Docker Service is Started
+      systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Add Kubernetes Repository (v1.28)
+      shell: |
+        cat <<EOF | sudo tee /etc/yum.repos.d/kubernetes.repo
+        [kubernetes]
+        name=Kubernetes
+        baseurl=https://k8s.io
+        enabled=1
+        gpgcheck=1
+        gpgkey=https://k8s.iorepodata/repomd.xml.key
+        EOF
+
+    - name: Install Kubeadm, Kubelet, and Kubectl
+      shell: sudo yum install -y kubeadm-1.28.1-1.1 kubelet-1.28.1-1.1 kubectl-1.28.1-1.1
+
+- name: Configure Master Node
+  hosts: master_node
+  become: true
+  tasks:
+    - name: Initialize Cluster on Master Node
+      shell: sudo kubeadm init --pod-network-cidr=10.244.0.0/16 --cri-socket=unix:///var/run/cri-dockerd.sock
+      register: kubeadm_output
+
+    - name: Setup local kubeconfig for Root / EC2 User
+      shell: |
+        mkdir -p $HOME/.kube
+        cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+        chown $(id -u):$(id -g) $HOME/.kube/config
+
+    - name: Install Calico Network Plugin
+      shell: kubectl apply -f https://githubusercontent.com
+
+    - name: Extract Join Command
+      shell: kubeadm token create --print-join-command
+      register: join_command_raw
+
+    - name: Share join token with workers
+      add_host:
+        name: "JOIN_COMMAND_HOLDER"
+        token: "{{ join_command_raw.stdout }}"
+
+- name: Configure Worker Nodes
+  hosts: worker_nodes
+  become: true
+  tasks:
+    - name: Join Workers to Cluster
+      shell: "{{ hostvars['JOIN_COMMAND_HOLDER']['token'] }} --cri-socket=unix:///var/run/cri-dockerd.sock"
+
+# ==================== CLUSTER HEALTH VERIFICATION ====================
+- name: Verify Cluster Status
+  hosts: master_node
+  become: true
+  tasks:
+    - name: Wait until Master and all Worker Nodes show Ready status
+      shell: kubectl get nodes --no-headers | grep -v "Ready"
+      register: node_check
+      until: node_check.stdout == ""
+      retries: 12
+      delay: 10
+      ignore_errors: true
+
+    - name: Fetch Active Cluster Layout
+      shell: kubectl get nodes -o wide
+      register: cluster_status
+
+    - name: Print Verified Cluster Setup to Terminal
+      debug:
+        var: cluster_status.stdout_lines

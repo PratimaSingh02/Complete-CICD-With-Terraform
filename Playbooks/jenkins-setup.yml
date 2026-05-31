@@ -1,0 +1,43 @@
+---
+- name: Configure Jenkins Server
+  hosts: all
+  become: true
+  remote_user: ec2-user
+
+  tasks:
+    - name: Update all system packages
+      yum:
+        name: "*"
+        state: latest
+
+    - name: Download Jenkins Repository Key
+      get_url:
+        url: https://jenkins.io
+        dest: /etc/pki/tmplink/jenkins.io-2023.key
+        mode: '0644'
+
+    - name: Import Jenkins Key
+      rpm_key:
+        state: present
+        key: https://jenkins.io
+
+    - name: Add Jenkins Repository
+      get_url:
+        url: https://jenkins.io
+        dest: /etc/yum.repos.d/jenkins.repo
+
+    - name: Install Java 17 (Required for Jenkins)
+      yum:
+        name: java-17-amazon-corretto-devel
+        state: present
+
+    - name: Install Jenkins
+      yum:
+        name: jenkins
+        state: present
+
+    - name: Start and Enable Jenkins Service
+      systemd:
+        name: jenkins
+        state: started
+        enabled: true
