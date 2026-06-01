@@ -2,7 +2,6 @@ provider "aws" {
   region = var.aws_region
 }
 
-# 2. Provision the Single Master Node
 resource "aws_instance" "master" {
   ami                    = data.aws_ami.amazonlinux2.id
   instance_type          = var.instance_type
@@ -11,21 +10,31 @@ resource "aws_instance" "master" {
   # References the node security group defined inside security.tf
   vpc_security_group_ids = [aws_security_group.k8s_nodes_sg.id]
 
+  root_block_device {
+    volume_size           = 25
+    volume_type           = "gp3" 
+    delete_on_termination = true  
+  }
+
   tags = {
     Name = "K8s-Master"
     Role = "master"
   }
 }
 
-# 3. Provision the Two Worker Nodes
 resource "aws_instance" "workers" {
   count                  = 2
   ami                    = data.aws_ami.amazonlinux2.id
   instance_type          = var.instance_type
   key_name               = var.my_key
   
-  # References the node security group defined inside security.tf
   vpc_security_group_ids = [aws_security_group.k8s_nodes_sg.id]
+
+  root_block_device {
+    volume_size           = 25
+    volume_type           = "gp3" # gp3 is the modern AWS standard (faster and cheaper than gp2)
+    delete_on_termination = true  # Ensures AWS cleans up the storage when you run "terraform destroy"
+  }
 
   tags = {
     Name = "K8s-Worker-${count.index + 1}"

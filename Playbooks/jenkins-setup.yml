@@ -41,3 +41,52 @@
         name: jenkins
         state: started
         enabled: true
+
+
+    - name: Install Docker Engine natively from Amazon repositories
+      yum:
+        name: docker
+        state: present
+
+    - name: Ensure Docker system group exists
+      group:
+        name: docker
+        state: present
+
+    - name: Configure secure permissions on Docker socket file
+      file:
+        path: /var/run/docker.sock
+        mode: '0660'
+        owner: root
+        group: docker
+
+    - name: Add both administrative and Jenkins users to the Docker group
+      user:
+        name: "{{ item }}"
+        groups: docker
+        append: true
+      loop:
+        - ec2-user
+        - jenkins 
+
+    - name: Start and Enable Docker Service
+      systemd:
+        name: docker
+        state: started
+        enabled: true
+
+
+    - name: Add official Kubernetes v1.28 Repository for Jenkins
+      yum_repository:
+        name: kubernetes
+        description: Kubernetes Package Repository
+        baseurl: https://k8s.io
+        enabled: true
+        gpgcheck: true
+        gpgkey: https://k8s.iorepodata/repomd.xml.key
+
+    - name: Install Kubectl tool on Jenkins Server
+      yum:
+        name: kubectl-1.28.1-1.1
+        state: present
+
